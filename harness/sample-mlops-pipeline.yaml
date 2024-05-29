@@ -10,12 +10,6 @@ pipeline:
         type: CI
         spec:
           cloneCodebase: true
-          platform:
-            os: Linux
-            arch: Amd64
-          runtime:
-            type: Cloud
-            spec: {}
           execution:
             steps:
               - step:
@@ -23,9 +17,9 @@ pipeline:
                   name: Harness Training
                   identifier: Harness_Training
                   spec:
-                    connectorRef: mlopsawsconnector
-                    region: YOUR_AWS_REGION
-                    account: YOUR_AWS_ACCOUNT_ID
+                    connectorRef: account.AWS_Sales_Account
+                    region: us-east-1
+                    account: "759984737373"
                     imageName: ccapproval
                     tags:
                       - <+pipeline.executionId>
@@ -37,6 +31,8 @@ pipeline:
                   name: Wait for ECR Image Scan
                   identifier: Wait_for_ECR_Image_Scan
                   spec:
+                    connectorRef: account.james_dockerhub
+                    image: ubuntu:latest
                     shell: Sh
                     command: |-
                       echo "ECR Image Scan In Progress...
@@ -50,25 +46,30 @@ pipeline:
                     config: default
                     target:
                       type: container
-                      name: ccapproval-ecr-scan
-                      variant: <+pipeline.executionId>
+                      detection: auto
                     advanced:
                       log:
                         level: info
-                    settings:
-                      AWS_SESSION_TOKEN: <+secrets.getValue("aws_session_token")>
                     auth:
-                      access_token: <+secrets.getValue("aws_secret_access_key")>
-                      access_id: <+secrets.getValue("aws_access_key_id")>
-                      region: YOUR_AWS_REGION
+                      access_token: <+secrets.getValue("account.harnessSecretManager")>
+                      access_id: AKIA3B4U6ZROQ4XQNWEP
+                      region: us-east-1
                     image:
                       type: aws_ecr
                       name: ccapproval
-                      region: YOUR_AWS_REGION
+                      region: us-east-1
                       tag: <+pipeline.executionId>
           caching:
             enabled: false
             paths: []
+          infrastructure:
+            type: KubernetesDirect
+            spec:
+              connectorRef: account.sesandboxdelegate
+              namespace: builds
+              automountServiceAccountToken: true
+              nodeSelector: {}
+              os: Linux
         when:
           pipelineStatus: Success
     - stage:
@@ -78,12 +79,6 @@ pipeline:
         type: CI
         spec:
           cloneCodebase: true
-          platform:
-            os: Linux
-            arch: Amd64
-          runtime:
-            type: Cloud
-            spec: {}
           execution:
             steps:
               - step:
@@ -91,11 +86,10 @@ pipeline:
                   name: pytest
                   identifier: pytest
                   spec:
-                    connectorRef: mlopsawsconnector
-                    image: YOUR_AWS_ACCOUNT_ID.dkr.ecr.YOUR_AWS_REGION.amazonaws.com/ccapproval:<+pipeline.executionId>
+                    connectorRef: account.AWS_Sales_Account
+                    image: 759984737373.dkr.ecr.us-east-1.amazonaws.com/ccapproval:<+pipeline.executionId>
                     shell: Sh
-                    command: |
-                      pytest --nbval-lax credit_card_approval.ipynb --junitxml=report.xml
+                    command: pytest --nbval-lax credit_card_approval.ipynb --junitxml=report.xml
                   failureStrategies:
                     - onFailure:
                         errors:
@@ -109,9 +103,9 @@ pipeline:
                   name: Build and Push Lambda Deployment Image
                   identifier: Build_and_Push_Lambda_Deployment_Image
                   spec:
-                    connectorRef: mlopsawsconnector
-                    region: YOUR_AWS_REGION
-                    account: YOUR_AWS_ACCOUNT_ID
+                    connectorRef: account.AWS_Sales_Account
+                    region: us-east-1
+                    account: AKIA3B4U6ZROQ4XQNWEP
                     imageName: ccapproval-deploy
                     tags:
                       - <+pipeline.executionId>
@@ -121,19 +115,19 @@ pipeline:
                   name: Upload artifacts to S3
                   identifier: Upload_artifacts_to_S3
                   spec:
-                    connectorRef: mlopsawsconnector
-                    region: YOUR_AWS_REGION
-                    bucket: YOUR_S3_BUCKET
+                    connectorRef: account.AWS_Sales_Account
+                    region: us-east-1
+                    bucket: nic-mlops
                     sourcePath: /harness/output/model_metrics.html
               - step:
                   type: Plugin
                   name: Publish ML model visualization
                   identifier: Publish_ML_model_visualization
                   spec:
-                    connectorRef: account.harnessImage
+                    connectorRef: account.james_dockerhub
                     image: plugins/artifact-metadata-publisher
                     settings:
-                      file_urls: https://YOUR_S3_BUCKET.s3.YOUR_AWS_REGION.amazonaws.com/harness/output/model_metrics.html
+                      file_urls: https://nic-mlops.amazonaws.com/harness/output/model_metrics.html
               - step:
                   type: Run
                   name: Export accuracy and fairness variables
@@ -170,6 +164,8 @@ pipeline:
             paths: []
           sharedPaths:
             - /harness/output
+          infrastructure:
+            useFromStage: Train_Model
         when:
           pipelineStatus: Success
     - stage:
@@ -201,21 +197,6 @@ pipeline:
                       - name: fairness_equalopportunity
                         type: String
                         value: fairness_equalopportunity
-                  timeout: 10m
-              - step:
-                  type: Policy
-                  name: Enforce Fairness and Accuracy Policy
-                  identifier: Enforce_Fairness_Policy
-                  spec:
-                    policySets:
-                      - Credit_Card_Approval_Policy_Set
-                    type: Custom
-                    policySpec:
-                      payload: |-
-                        {
-                            "accuracy": <+execution.steps.Accuracy_and_Fairness.output.outputVariables.accuracy>,
-                            "fairnessScoreEqualOpportunity": <+execution.steps.Accuracy_and_Fairness.output.outputVariables.fairness_equalopportunity>
-                        }
                   timeout: 10m
         tags: {}
         when:
@@ -357,7 +338,8 @@ pipeline:
   properties:
     ci:
       codebase:
-        connectorRef: mlopsgithubconnector
+        connectorRef: Nic_Github
+        repoName: tuffacton/mlops-creditcard-approval-model
         build: <+input>
   notificationRules: []
   allowStageExecutions: true
